@@ -167,7 +167,14 @@
         </div>
       </div>
       <div class="group">
-        <label class="check"><input id="glow" type="checkbox" checked> 光らせる</label>
+        <span class="lbl">光</span>
+        <div class="seg full" id="glowseg" role="group" aria-label="光の強さ">
+          <button type="button" data-g="0">なし</button>
+          <button type="button" data-g="1">淡く</button>
+          <button type="button" data-g="2">強く</button>
+        </div>
+        <label class="check"><input id="outline" type="checkbox" checked> 縁取り線</label>
+        <label class="check"><input id="texture" type="checkbox" checked> 質感（まだらな濃淡）</label>
         <label class="check"><input id="guides" type="checkbox" checked> ガイド線を表示</label>
         <label class="check"><input id="showcuts" type="checkbox" checked> 消しゴムの形を表示</label>
         <label class="check"><input id="bykaku" type="checkbox"> 画ごとに色分けして表示</label>

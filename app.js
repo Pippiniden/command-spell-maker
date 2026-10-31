@@ -1,6 +1,6 @@
 var VB = 400, AX = 200;
 var KAKU_COL = { 1: '#e3363e', 2: '#f0923a', 3: '#c95bd0' };
-var COLORS = [['紅', '#d4202b'], ['朱', '#e8462a'], ['深紅', '#94111f'], ['紫', '#8d3fd4'], ['蒼', '#2f7de0'], ['金', '#d9a531']];
+var COLORS = [['血', '#b3121e'], ['紅', '#d4202b'], ['朱', '#e8462a'], ['深紅', '#94111f'], ['紫', '#8d3fd4'], ['蒼', '#2f7de0'], ['金', '#d9a531']];
 var PC = (typeof polygonClipping !== 'undefined') ? polygonClipping : null;
 
 function r1(n) { return Math.round(n * 10) / 10; }
@@ -171,6 +171,33 @@ function composite(shapes) {
   return { items: items, cuts: cuts };
 }
 
+function glowLevel(st) { var g = st.glow; return g === true || g == null ? 2 : g === false ? 0 : g; }
+/* 仕上げの効果：まだらな質感、近くの光、大きく広がる光 */
+function effects(st) {
+  var lv = glowLevel(st), tex = st.texture !== false;
+  if (!lv && !tex) return '';
+  var f = '<filter id="gl" filterUnits="userSpaceOnUse" x="0" y="0" width="400" height="400" color-interpolation-filters="sRGB">', src = 'SourceGraphic';
+  if (tex) {
+    f += '<feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="3" seed="11" result="n"/>' +
+      '<feColorMatrix in="n" type="saturate" values="0" result="ng"/>' +
+      '<feComponentTransfer in="ng" result="nt"><feFuncR type="linear" slope="0.75" intercept="0.5"/><feFuncG type="linear" slope="0.75" intercept="0.5"/><feFuncB type="linear" slope="0.75" intercept="0.5"/><feFuncA type="linear" slope="0" intercept="1"/></feComponentTransfer>' +
+      '<feComposite in="nt" in2="SourceAlpha" operator="in" result="nm"/>' +
+      '<feBlend in="SourceGraphic" in2="nm" mode="multiply" result="body"/>';
+    src = 'body';
+  }
+  var merge = '';
+  if (lv >= 2) {
+    f += '<feGaussianBlur in="' + src + '" stdDeviation="30" result="h"/><feComponentTransfer in="h" result="h2"><feFuncA type="linear" slope="5"/></feComponentTransfer>' +
+      '<feGaussianBlur in="' + src + '" stdDeviation="10" result="m"/><feComponentTransfer in="m" result="m2"><feFuncA type="linear" slope="1.7"/></feComponentTransfer>';
+    merge += '<feMergeNode in="h2"/><feMergeNode in="m2"/>';
+  }
+  if (lv >= 1) {
+    f += '<feGaussianBlur in="' + src + '" stdDeviation="' + (lv >= 2 ? 4 : 5) + '" result="b"/><feComponentTransfer in="b" result="b2"><feFuncA type="linear" slope="0.9"/></feComponentTransfer>';
+    merge += '<feMergeNode in="b2"/>';
+  }
+  return f + '<feMerge>' + merge + '<feMergeNode in="' + src + '"/></feMerge></filter>';
+}
+
 /* opts.screen: 画面用（当たり判定、消しゴムの輪郭）。opts.used: 使った画を薄く */
 function sealMarkup(shapes, st, opts) {
   var comp = composite(shapes), body = '';
@@ -178,16 +205,19 @@ function sealMarkup(shapes, st, opts) {
     var s = it.s, col = opts.screen && st.byKaku ? KAKU_COL[s.kaku] : st.color;
     var gone = opts.used && opts.used[s.kaku - 1];
     var hit = opts.screen ? ' stroke="transparent" stroke-width="10" vector-effect="non-scaling-stroke"' : '';
+    var line = st.outline !== false;
+    var P = function (d, rule) {
+      return '<path d="' + d + '" fill="' + col + '" fill-rule="' + rule + '"' + hit + '/>' +
+        (line ? '<path d="' + d + '" fill="none" stroke="#ffd9d0" stroke-opacity="0.55" stroke-width="0.45" stroke-linejoin="round" pointer-events="none"/>' : '');
+    };
     var paths;
-    if (it.clipped) paths = it.mp.length ? '<path d="' + mpD(it.mp) + '" fill="' + col + '" fill-rule="evenodd"' + hit + '/>' : '';
-    else paths = it.mp.map(function (poly) { return '<path d="' + mpD([poly]) + '" fill="' + col + '" fill-rule="' + (s.kind === 'stroke' ? 'nonzero' : 'evenodd') + '"' + hit + '/>'; }).join('');
+    if (it.clipped) paths = it.mp.length ? P(mpD(it.mp), 'evenodd') : '';
+    else paths = it.mp.map(function (poly) { return P(mpD([poly]), s.kind === 'stroke' ? 'nonzero' : 'evenodd'); }).join('');
     var g = '<g' + (opts.screen ? ' data-id="' + s.id + '"' : '') + (gone ? ' opacity="0.07"' : '') + '>' + paths + '</g>';
     body += g;
   });
-  var out = st.glow ? '<defs><filter id="gl" filterUnits="userSpaceOnUse" x="0" y="0" width="400" height="400">' +
-    '<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>' +
-    '<feComponentTransfer in="b" result="b2"><feFuncA type="linear" slope="0.85"/></feComponentTransfer>' +
-    '<feMerge><feMergeNode in="b2"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><g filter="url(#gl)">' + body + '</g>' : '<g>' + body + '</g>';
+  var fx = effects(st);
+  var out = fx ? '<defs>' + fx + '</defs><g filter="url(#gl)">' + body + '</g>' : '<g>' + body + '</g>';
   if (opts.screen && opts.showCuts) {
     out += '<g>' + comp.cuts.map(function (c) {
       var d = mpD(c.mp);
@@ -293,7 +323,7 @@ if (typeof document !== 'undefined') (function () {
   var $ = function (id) { return document.getElementById(id); };
   var cv = $('cv');
   var KEY = 'reiju-designer-v1';
-  var doc = { shapes: [], st: { color: '#d4202b', bg: 'ink', glow: true, byKaku: false, name: 'わたしの令呪' } };
+  var doc = { shapes: [], st: { color: '#b3121e', bg: 'ink', glow: 2, outline: true, texture: true, byKaku: false, name: 'わたしの令呪' } };
   var ui = { mode: 'select', sel: [], multi: false, warp: false, newOp: 'add', newKaku: 1, newMirror: true, brushW: 14, brushP: 'sweep', guides: true, showCuts: true, used: [false, false, false] };
   var hist = [], redo = [];
 
@@ -393,7 +423,8 @@ if (typeof document !== 'undefined') (function () {
     seg('#bgseg', 'bg', doc.st.bg);
     document.querySelectorAll('#swatches .sw').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.c.toLowerCase() === doc.st.color.toLowerCase())); });
     $('custom').value = doc.st.color;
-    $('glow').checked = doc.st.glow; $('bykaku').checked = doc.st.byKaku; $('guides').checked = ui.guides; $('showcuts').checked = ui.showCuts;
+    seg('#glowseg', 'g', glowLevel(doc.st)); $('outline').checked = doc.st.outline !== false; $('texture').checked = doc.st.texture !== false;
+    $('bykaku').checked = doc.st.byKaku; $('guides').checked = ui.guides; $('showcuts').checked = ui.showCuts;
     if (document.activeElement !== $('dname')) $('dname').value = doc.st.name || '';
 
     var n = ui.sel.length, s = one();
@@ -631,7 +662,9 @@ if (typeof document !== 'undefined') (function () {
   sw.addEventListener('click', function (e) { var b = e.target.closest('.sw'); if (!b) return; doc.st.color = b.dataset.c; render(); });
   $('custom').addEventListener('input', function () { doc.st.color = this.value; render(); });
   $('bgseg').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; doc.st.bg = b.dataset.bg; render(); });
-  $('glow').onchange = function () { doc.st.glow = this.checked; render(); };
+  $('glowseg').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; doc.st.glow = +b.dataset.g; render(); });
+  $('outline').onchange = function () { doc.st.outline = this.checked; render(); };
+  $('texture').onchange = function () { doc.st.texture = this.checked; render(); };
   $('guides').onchange = function () { ui.guides = this.checked; render(); };
   $('showcuts').onchange = function () { ui.showCuts = this.checked; render(); };
   $('bykaku').onchange = function () { doc.st.byKaku = this.checked; render(); };
@@ -642,7 +675,7 @@ if (typeof document !== 'undefined') (function () {
   function msg(t) { $('msg').textContent = t; }
   function fileBase() { return ((doc.st.name || '').trim() || '令呪').replace(/[\\/:*?"<>|]/g, '_'); }
   function exportSVG() {
-    var st = { color: doc.st.color, glow: doc.st.glow, byKaku: false };
+    var st = { color: doc.st.color, glow: glowLevel(doc.st), outline: doc.st.outline !== false, texture: doc.st.texture !== false, byKaku: false };
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="1200" height="1200">' + bgMarkup(doc.st.bg, false) + sealMarkup(doc.shapes, st, { screen: false }) + '</svg>';
   }
   function toPNG() {
