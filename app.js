@@ -1,6 +1,6 @@
 var VB = 400, AX = 200;
 var KAKU_COL = { 1: '#e3363e', 2: '#f0923a', 3: '#c95bd0' };
-var COLORS = [['紅', '#d4202b'], ['朱', '#e8462a'], ['深紅', '#94111f'], ['紫', '#8d3fd4'], ['蒼', '#2f7de0'], ['金', '#d9a531']];
+var COLORS = [['血', '#b3121e'], ['紅', '#d4202b'], ['朱', '#e8462a'], ['深紅', '#94111f'], ['紫', '#8d3fd4'], ['蒼', '#2f7de0'], ['金', '#d9a531']];
 var PC = (typeof polygonClipping !== 'undefined') ? polygonClipping : null;
 
 function r1(n) { return Math.round(n * 10) / 10; }
@@ -171,6 +171,33 @@ function composite(shapes) {
   return { items: items, cuts: cuts };
 }
 
+function glowLevel(st) { var g = st.glow; return g === true || g == null ? 1 : g === false ? 0 : g; }
+/* 仕上げの効果：まだらな質感、近くの光、大きく広がる光 */
+function effects(st) {
+  var lv = glowLevel(st), tex = st.texture !== false;
+  if (!lv && !tex) return '';
+  var f = '<filter id="gl" filterUnits="userSpaceOnUse" x="0" y="0" width="400" height="400" color-interpolation-filters="sRGB">', src = 'SourceGraphic';
+  if (tex) {
+    f += '<feTurbulence type="fractalNoise" baseFrequency="0.025" numOctaves="3" seed="11" result="n"/>' +
+      '<feColorMatrix in="n" type="saturate" values="0" result="ng"/>' +
+      '<feComponentTransfer in="ng" result="nt"><feFuncR type="linear" slope="0.75" intercept="0.5"/><feFuncG type="linear" slope="0.75" intercept="0.5"/><feFuncB type="linear" slope="0.75" intercept="0.5"/><feFuncA type="linear" slope="0" intercept="1"/></feComponentTransfer>' +
+      '<feComposite in="nt" in2="SourceAlpha" operator="in" result="nm"/>' +
+      '<feBlend in="SourceGraphic" in2="nm" mode="multiply" result="body"/>';
+    src = 'body';
+  }
+  var merge = '';
+  if (lv >= 2) {
+    f += '<feGaussianBlur in="' + src + '" stdDeviation="30" result="h"/><feComponentTransfer in="h" result="h2"><feFuncA type="linear" slope="5"/></feComponentTransfer>' +
+      '<feGaussianBlur in="' + src + '" stdDeviation="10" result="m"/><feComponentTransfer in="m" result="m2"><feFuncA type="linear" slope="1.7"/></feComponentTransfer>';
+    merge += '<feMergeNode in="h2"/><feMergeNode in="m2"/>';
+  }
+  if (lv >= 1) {
+    f += '<feGaussianBlur in="' + src + '" stdDeviation="' + (lv >= 2 ? 4 : 5) + '" result="b"/><feComponentTransfer in="b" result="b2"><feFuncA type="linear" slope="0.9"/></feComponentTransfer>';
+    merge += '<feMergeNode in="b2"/>';
+  }
+  return f + '<feMerge>' + merge + '<feMergeNode in="' + src + '"/></feMerge></filter>';
+}
+
 /* opts.screen: 画面用（当たり判定、消しゴムの輪郭）。opts.used: 使った画を薄く */
 function sealMarkup(shapes, st, opts) {
   var comp = composite(shapes), body = '';
@@ -178,16 +205,19 @@ function sealMarkup(shapes, st, opts) {
     var s = it.s, col = opts.screen && st.byKaku ? KAKU_COL[s.kaku] : st.color;
     var gone = opts.used && opts.used[s.kaku - 1];
     var hit = opts.screen ? ' stroke="transparent" stroke-width="10" vector-effect="non-scaling-stroke"' : '';
+    var line = st.outline !== false;
+    var P = function (d, rule) {
+      return '<path d="' + d + '" fill="' + col + '" fill-rule="' + rule + '"' + hit + '/>' +
+        (line ? '<path d="' + d + '" fill="none" stroke="#ffd9d0" stroke-opacity="0.55" stroke-width="0.45" stroke-linejoin="round" pointer-events="none"/>' : '');
+    };
     var paths;
-    if (it.clipped) paths = it.mp.length ? '<path d="' + mpD(it.mp) + '" fill="' + col + '" fill-rule="evenodd"' + hit + '/>' : '';
-    else paths = it.mp.map(function (poly) { return '<path d="' + mpD([poly]) + '" fill="' + col + '" fill-rule="' + (s.kind === 'stroke' ? 'nonzero' : 'evenodd') + '"' + hit + '/>'; }).join('');
+    if (it.clipped) paths = it.mp.length ? P(mpD(it.mp), 'evenodd') : '';
+    else paths = it.mp.map(function (poly) { return P(mpD([poly]), s.kind === 'stroke' ? 'nonzero' : 'evenodd'); }).join('');
     var g = '<g' + (opts.screen ? ' data-id="' + s.id + '"' : '') + (gone ? ' opacity="0.07"' : '') + '>' + paths + '</g>';
     body += g;
   });
-  var out = st.glow ? '<defs><filter id="gl" filterUnits="userSpaceOnUse" x="0" y="0" width="400" height="400">' +
-    '<feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>' +
-    '<feComponentTransfer in="b" result="b2"><feFuncA type="linear" slope="0.85"/></feComponentTransfer>' +
-    '<feMerge><feMergeNode in="b2"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><g filter="url(#gl)">' + body + '</g>' : '<g>' + body + '</g>';
+  var fx = effects(st);
+  var out = fx ? '<defs>' + fx + '</defs><g filter="url(#gl)">' + body + '</g>' : '<g>' + body + '</g>';
   if (opts.screen && opts.showCuts) {
     out += '<g>' + comp.cuts.map(function (c) {
       var d = mpD(c.mp);
@@ -214,25 +244,28 @@ function makeShape(kind, key, o) {
   for (var k in o) s[k] = o[k];
   return s;
 }
-function sampleShapes() {
-  return [
-    makeShape('stroke', 'sword',    { x: 200, y: 150, s: 1.85, w: 12, kaku: 1, mirror: false }),
-    makeShape('stroke', 'wing',     { x: 252, y: 128, s: 1.15, rot: -4, kaku: 1 }),
-    makeShape('stroke', 'wing',     { x: 246, y: 170, s: 0.8, rot: 12, kaku: 1 }),
-    makeShape('stroke', 'crescent', { x: 200, y: 232, s: 1.25, w: 16, kaku: 2, mirror: false }),
-    makeShape('prim',   'diamond',  { x: 200, y: 220, s: 0.5, kaku: 2, mirror: false }),
-    makeShape('prim',   'arrow',    { x: 200, y: 268, s: 0.42, rot: 180, kaku: 2, mirror: false, op: 'cut' }),
-    makeShape('stroke', 'wave',     { x: 268, y: 142, s: 0.6, w: 12, rot: 50, kaku: 1, op: 'cut' }),
-    makeShape('stroke', 'hook',     { x: 236, y: 296, s: 0.85, rot: 160, kaku: 3, warp: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [-14, 10], [0, 0]] }),
-    makeShape('prim',   'drop',     { x: 200, y: 322, s: 0.7, rot: 180, kaku: 3, mirror: false })
-  ];
+/* ---- デフォルトの令呪 ----
+   座標は元絵（1536×1024）の画素位置で書き、キャンバスの400単位に写す */
+var REF = { cx: 768, top: 22, k: 0.39 };
+function imgPt(p) { return [AX + (p[0] - REF.cx) * REF.k, 10 + (p[1] - REF.top) * REF.k]; }
+function localize(pts) {
+  var b = mpBBox([[pts]]), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  return { cx: cx, cy: cy, pts: pts.map(function (q) { return [r1(q[0] - cx), r1(q[1] - cy)]; }) };
+}
+/* デフォルト令呪：作者のシルエット画像を左右対称にそろえ、パーツごとにベジェ曲線で取り出したデータ（キャンバス座標、k=画、m=左右対称） */
+var DEFAULT_SEAL = [{"k":1,"m":false,"x":200.0,"y":200.0,"g":[[[[-0.1,172.8],[-0.4,170.9],[-0.6,168.5],[-1.0,165.2],[-1.5,161.7],[-1.9,157.9],[-2.4,153.9],[-2.9,149.8],[-3.5,145.7],[-4.0,141.5],[-4.6,137.3],[-5.1,133.1],[-5.7,129.0],[-6.2,125.1],[-6.7,121.3],[-7.2,117.8],[-7.7,114.5],[-8.1,111.5],[-8.5,108.9],[-9.3,104.6],[-10.0,100.5],[-10.9,96.4],[-11.9,92.3],[-12.9,88.4],[-14.0,84.5],[-15.2,80.7],[-16.5,76.9],[-17.8,73.2],[-19.3,69.6],[-20.8,66.0],[-22.5,62.5],[-24.2,59.0],[-26.0,55.6],[-27.9,52.2],[-29.9,48.9],[-31.4,46.3],[-32.5,44.4],[-33.0,43.5],[-32.3,42.6],[-30.8,40.9],[-28.4,38.2],[-26.1,34.8],[-24.0,30.8],[-22.1,26.2],[-20.3,21.1],[-18.6,15.4],[-17.1,9.1],[-15.8,2.3],[-14.6,-4.9],[-13.6,-12.7],[-12.8,-20.9],[-12.1,-29.5],[-11.6,-38.6],[-11.3,-48.1],[-11.2,-57.9],[-11.3,-68.2],[-11.4,-72.9],[-11.5,-76.9],[-11.5,-80.1],[-11.6,-82.7],[-11.8,-84.8],[-11.9,-86.5],[-12.1,-87.8],[-12.3,-88.9],[-12.6,-89.9],[-13.0,-90.8],[-13.5,-91.8],[-14.4,-93.7],[-15.4,-95.5],[-16.5,-97.2],[-17.6,-98.8],[-18.8,-100.4],[-20.1,-101.9],[-21.5,-103.4],[-23.5,-105.4],[-24.3,-106.4],[-23.8,-107.0],[-22.6,-108.5],[-21.3,-110.1],[-20.0,-111.9],[-18.8,-113.9],[-17.6,-116.1],[-16.4,-118.6],[-15.1,-121.2],[-13.9,-124.1],[-12.7,-127.2],[-11.6,-130.6],[-10.4,-134.1],[-9.2,-138.0],[-8.0,-142.1],[-6.8,-146.4],[-5.5,-151.1],[-4.3,-156.0],[-3.1,-161.1],[-2.0,-165.6],[-1.2,-169.0],[-0.6,-171.5],[-0.2,-173.2],[0.1,-174.3],[0.3,-174.8],[0.5,-175.0],[0.6,-174.8],[0.8,-174.3],[1.1,-173.2],[1.6,-171.5],[2.2,-169.0],[3.0,-165.6],[4.0,-161.1],[5.3,-156.0],[6.5,-151.1],[7.7,-146.4],[8.9,-142.1],[10.1,-138.0],[11.3,-134.1],[12.5,-130.6],[13.7,-127.2],[14.9,-124.1],[16.1,-121.2],[17.3,-118.6],[18.5,-116.1],[19.8,-113.9],[21.0,-111.9],[22.3,-110.1],[23.5,-108.5],[24.7,-107.0],[25.2,-106.4],[24.4,-105.4],[22.4,-103.4],[21.1,-101.9],[19.8,-100.4],[18.6,-98.8],[17.4,-97.2],[16.4,-95.5],[15.4,-93.7],[14.4,-91.8],[14.0,-90.8],[13.6,-89.9],[13.3,-88.9],[13.1,-87.8],[12.9,-86.5],[12.7,-84.8],[12.6,-82.7],[12.5,-80.1],[12.4,-76.9],[12.3,-72.9],[12.3,-68.2],[12.2,-57.9],[12.3,-48.1],[12.6,-38.6],[13.1,-29.5],[13.7,-20.9],[14.6,-12.7],[15.6,-4.9],[16.7,2.3],[18.1,9.1],[19.6,15.4],[21.2,21.1],[23.0,26.2],[25.0,30.8],[27.1,34.8],[29.3,38.2],[31.7,40.9],[33.3,42.6],[33.9,43.5],[33.5,44.4],[32.4,46.3],[30.9,48.9],[28.9,52.2],[27.0,55.6],[25.2,59.0],[23.4,62.5],[21.8,66.0],[20.3,69.6],[18.8,73.2],[17.4,76.9],[16.2,80.7],[15.0,84.5],[13.8,88.4],[12.8,92.3],[11.9,96.4],[11.0,100.5],[10.2,104.6],[9.5,108.9],[9.1,111.5],[8.7,114.5],[8.2,117.8],[7.7,121.3],[7.2,125.1],[6.6,129.0],[6.1,133.1],[5.5,137.3],[5.0,141.5],[4.4,145.7],[3.9,149.8],[3.4,153.9],[2.9,157.9],[2.4,161.7],[2.0,165.2],[1.6,168.5],[1.2,171.8],[0.9,173.7],[0.7,174.7],[0.5,175.0],[0.3,174.7],[0.0,173.9]],[[1.3,102.4],[1.6,100.7],[2.0,98.7],[2.4,96.5],[3.1,92.9],[3.9,89.4],[4.6,86.0],[5.4,82.7],[6.2,79.6],[7.1,76.6],[7.9,73.7],[8.8,70.9],[9.8,68.2],[10.8,65.5],[11.8,63.0],[12.8,60.6],[13.9,58.2],[15.1,55.9],[16.3,53.7],[17.5,51.5],[18.3,49.8],[18.2,48.6],[16.9,46.7],[15.5,44.6],[14.1,42.5],[12.8,40.5],[11.6,38.3],[10.5,36.2],[9.5,33.9],[8.5,31.6],[7.6,29.1],[6.8,26.5],[6.0,23.7],[5.2,20.8],[4.5,17.7],[3.8,14.3],[3.1,10.7],[2.4,6.9],[1.8,2.7],[1.3,-0.1],[1.0,-2.1],[0.7,-3.3],[0.5,-3.7],[0.2,-3.3],[-0.0,-2.1],[-0.4,-0.1],[-0.8,2.7],[-1.5,6.9],[-2.2,10.7],[-2.8,14.3],[-3.5,17.7],[-4.3,20.8],[-5.0,23.7],[-5.8,26.5],[-6.7,29.1],[-7.6,31.6],[-8.5,33.9],[-9.6,36.2],[-10.7,38.3],[-11.9,40.5],[-13.1,42.5],[-14.5,44.6],[-16.0,46.7],[-17.2,48.6],[-17.4,49.8],[-16.5,51.5],[-15.3,53.7],[-14.1,55.9],[-13.0,58.2],[-11.9,60.6],[-10.8,63.0],[-9.8,65.5],[-8.8,68.2],[-7.9,70.9],[-7.0,73.7],[-6.1,76.6],[-5.3,79.6],[-4.4,82.7],[-3.7,86.0],[-2.9,89.4],[-2.2,92.9],[-1.5,96.5],[-0.7,100.6],[-0.2,103.1],[0.1,104.5],[0.3,105.1],[0.5,105.2],[0.8,104.7],[1.1,103.5]]]]},{"k":2,"m":true,"x":82.7,"y":150.0,"g":[[[[64.1,90.2],[61.7,84.2],[59.1,78.5],[56.3,73.0],[53.2,67.8],[50.0,62.9],[46.6,58.3],[42.9,53.9],[39.1,49.8],[35.2,46.1],[31.0,42.6],[26.7,39.4],[22.2,36.5],[17.5,33.9],[12.7,31.7],[7.7,29.8],[4.0,28.4],[0.3,26.8],[-3.2,25.1],[-6.7,23.3],[-10.1,21.3],[-13.4,19.2],[-16.5,16.9],[-19.6,14.5],[-22.6,12.0],[-25.5,9.3],[-28.2,6.5],[-30.9,3.6],[-33.4,0.5],[-35.8,-2.7],[-38.1,-6.0],[-40.3,-9.5],[-42.2,-12.8],[-44.1,-16.5],[-46.0,-20.4],[-47.9,-24.7],[-49.7,-29.3],[-51.6,-34.1],[-53.4,-39.2],[-55.1,-44.4],[-56.9,-49.9],[-58.5,-55.5],[-60.1,-61.2],[-61.6,-67.0],[-63.0,-72.9],[-64.3,-78.8],[-65.6,-84.8],[-66.7,-90.7],[-67.2,-93.6],[-67.5,-95.8],[-67.7,-97.3],[-67.7,-98.0],[-67.5,-98.2],[-67.0,-97.6],[-66.4,-96.4],[-65.5,-94.6],[-64.3,-92.1],[-61.6,-86.7],[-58.8,-81.3],[-55.8,-76.0],[-52.7,-70.7],[-49.5,-65.6],[-46.2,-60.5],[-42.7,-55.5],[-39.1,-50.7],[-35.5,-45.9],[-31.7,-41.2],[-27.8,-36.7],[-23.9,-32.3],[-19.8,-28.0],[-15.7,-23.9],[-11.5,-19.9],[-7.2,-16.1],[-5.7,-14.8],[-4.1,-13.4],[-2.3,-12.0],[-0.4,-10.4],[1.7,-8.7],[4.0,-6.8],[6.5,-4.8],[9.3,-2.7],[12.3,-0.3],[15.5,2.2],[19.0,4.9],[22.8,7.8],[26.8,10.9],[31.2,14.3],[35.9,17.9],[40.9,21.7],[44.3,24.2],[46.9,26.2],[48.9,27.7],[50.3,29.0],[51.4,29.9],[52.1,30.7],[52.6,31.5],[52.9,32.2],[53.3,33.1],[53.6,34.2],[54.8,38.2],[56.1,42.4],[57.3,46.7],[58.6,51.3],[59.8,55.9],[60.9,60.5],[62.0,65.1],[63.1,69.7],[64.0,74.1],[64.9,78.3],[65.7,82.2],[66.3,85.9],[66.9,89.2],[67.3,92.1],[67.5,94.6],[67.6,96.5],[67.5,98.3],[67.0,98.2],[66.3,96.4]]]]},{"k":3,"m":true,"x":98.6,"y":235.3,"g":[[[[65.3,75.4],[64.4,72.1],[63.5,68.8],[62.4,65.6],[61.2,62.4],[59.8,59.1],[58.4,55.9],[56.8,52.6],[55.1,49.3],[53.3,46.0],[51.3,42.6],[49.1,39.1],[46.8,35.6],[44.4,32.1],[41.8,28.4],[39.0,24.7],[36.3,21.2],[33.6,17.8],[30.9,14.6],[28.1,11.6],[25.3,8.6],[22.5,5.9],[19.7,3.3],[16.9,0.8],[14.1,-1.4],[11.3,-3.6],[8.4,-5.5],[5.6,-7.3],[2.8,-9.0],[-0.1,-10.4],[-2.9,-11.7],[-5.7,-12.8],[-7.6,-13.5],[-9.9,-14.1],[-12.2,-14.7],[-14.6,-15.2],[-17.0,-15.7],[-19.2,-16.0],[-21.3,-16.2],[-22.9,-16.3],[-23.5,-16.6],[-24.6,-17.3],[-26.2,-18.3],[-28.1,-19.7],[-30.2,-21.2],[-32.5,-22.8],[-34.7,-24.4],[-36.7,-25.9],[-38.5,-27.2],[-39.8,-28.2],[-41.8,-30.0],[-43.8,-31.9],[-45.7,-34.0],[-47.7,-36.3],[-49.6,-38.8],[-51.5,-41.5],[-53.4,-44.3],[-55.3,-47.2],[-57.1,-50.3],[-58.8,-53.6],[-60.5,-57.0],[-62.2,-60.5],[-63.8,-64.1],[-65.3,-67.8],[-66.8,-71.6],[-68.2,-75.5],[-69.1,-78.1],[-69.6,-79.9],[-69.8,-80.9],[-69.6,-81.1],[-68.9,-80.5],[-67.9,-79.1],[-66.3,-77.0],[-64.2,-74.1],[-62.1,-71.4],[-59.9,-68.8],[-57.7,-66.3],[-55.5,-63.9],[-53.2,-61.6],[-50.9,-59.5],[-48.6,-57.5],[-46.3,-55.6],[-43.9,-53.8],[-41.4,-52.1],[-38.9,-50.5],[-36.4,-49.0],[-33.8,-47.6],[-31.1,-46.4],[-28.4,-45.2],[-27.1,-44.7],[-25.3,-44.0],[-23.0,-43.1],[-20.5,-42.2],[-17.9,-41.3],[-14.8,-40.1],[-12.0,-39.1],[-9.5,-38.1],[-7.1,-37.2],[-4.9,-36.3],[-2.9,-35.4],[-1.1,-34.6],[0.6,-33.8],[2.2,-33.0],[3.7,-32.2],[5.2,-31.4],[6.6,-30.5],[8.0,-29.7],[9.4,-28.7],[10.9,-27.7],[13.7,-25.7],[16.4,-23.4],[19.2,-20.9],[21.9,-18.2],[24.6,-15.3],[27.3,-12.3],[29.9,-9.0],[32.5,-5.6],[35.1,-2.0],[37.6,1.8],[40.1,5.8],[42.6,9.9],[45.0,14.3],[47.3,18.7],[49.6,23.4],[51.9,28.2],[53.5,31.6],[54.5,33.5],[55.0,34.1],[55.4,33.7],[55.5,32.9],[55.8,31.6],[56.0,29.7],[56.3,27.5],[56.6,25.0],[56.8,22.4],[57.1,19.6],[57.3,16.9],[57.5,14.3],[57.7,11.9],[57.8,9.9],[57.8,8.3],[57.9,5.1],[58.2,3.3],[58.6,2.7],[59.0,3.3],[59.8,4.6],[60.8,6.4],[61.8,8.6],[62.8,10.9],[63.7,13.0],[64.4,14.8],[65.4,18.2],[66.3,21.7],[67.1,25.4],[67.8,29.3],[68.4,33.2],[68.9,37.3],[69.3,41.4],[69.6,45.6],[69.8,49.8],[69.9,54.1],[69.8,58.3],[69.7,62.4],[69.4,66.5],[69.0,70.6],[68.5,74.5],[67.9,78.3],[67.4,80.4],[67.0,81.1],[66.5,80.5],[66.0,78.6]]]]},{"k":1,"m":false,"x":200.0,"y":255.9,"g":[[[[-0.5,20.0],[-1.0,18.1],[-1.6,16.0],[-2.3,13.9],[-3.0,11.8],[-3.6,9.8],[-4.3,8.0],[-4.9,6.5],[-6.2,3.2],[-6.7,1.3],[-6.7,-0.2],[-6.1,-1.8],[-5.5,-3.4],[-4.8,-5.2],[-4.2,-7.0],[-3.6,-8.9],[-3.0,-10.8],[-2.4,-12.8],[-1.8,-14.9],[-1.3,-16.9],[-0.7,-19.4],[-0.2,-21.2],[0.2,-22.2],[0.5,-22.6],[0.8,-22.2],[1.2,-21.2],[1.6,-19.4],[2.3,-16.9],[2.8,-14.9],[3.3,-12.8],[3.9,-10.8],[4.5,-8.9],[5.2,-7.0],[5.8,-5.2],[6.4,-3.4],[7.1,-1.8],[7.7,-0.2],[7.7,1.3],[7.1,3.2],[5.8,6.5],[5.2,8.0],[4.6,9.8],[3.9,11.8],[3.2,13.9],[2.6,16.0],[2.0,18.1],[1.4,20.0],[1.0,21.7],[0.8,22.3],[0.5,22.6],[0.2,22.3],[-0.0,21.7]]]]}];
+var SAMPLES = [{ name: '翼の槍', shapes: DEFAULT_SEAL }];
+function sampleShapes(i) {
+  return SAMPLES[i || 0].shapes.map(function (d) {
+    return { id: 's' + (nextId++), kind: 'merged', op: 'add', geom: JSON.parse(JSON.stringify(d.g)), x: d.x, y: d.y, rot: 0, s: 1, flip: false, mirror: d.m, kaku: d.k, warp: null };
+  });
 }
 
 if (typeof document !== 'undefined') (function () {
   var $ = function (id) { return document.getElementById(id); };
   var cv = $('cv');
   var KEY = 'reiju-designer-v1';
-  var doc = { shapes: [], st: { color: '#d4202b', bg: 'ink', glow: true, byKaku: false, name: 'わたしの令呪' } };
+  var doc = { shapes: [], st: { color: '#b3121e', bg: 'ink', glow: 1, outline: true, texture: true, byKaku: false, name: 'わたしの令呪' } };
   var ui = { mode: 'select', sel: [], multi: false, warp: false, newOp: 'add', newKaku: 1, newMirror: true, brushW: 14, brushP: 'sweep', guides: true, showCuts: true, used: [false, false, false] };
   var hist = [], redo = [];
 
@@ -332,7 +365,8 @@ if (typeof document !== 'undefined') (function () {
     seg('#bgseg', 'bg', doc.st.bg);
     document.querySelectorAll('#swatches .sw').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.c.toLowerCase() === doc.st.color.toLowerCase())); });
     $('custom').value = doc.st.color;
-    $('glow').checked = doc.st.glow; $('bykaku').checked = doc.st.byKaku; $('guides').checked = ui.guides; $('showcuts').checked = ui.showCuts;
+    seg('#glowseg', 'g', glowLevel(doc.st)); $('outline').checked = doc.st.outline !== false; $('texture').checked = doc.st.texture !== false;
+    $('bykaku').checked = doc.st.byKaku; $('guides').checked = ui.guides; $('showcuts').checked = ui.showCuts;
     if (document.activeElement !== $('dname')) $('dname').value = doc.st.name || '';
 
     var n = ui.sel.length, s = one();
@@ -474,6 +508,13 @@ if (typeof document !== 'undefined') (function () {
     clearTimeout(clearArm); clearArm = 0; $('clear').textContent = '全て消す';
     snap(); doc.shapes = []; doc.cleared = true; setSel([]); render();
   };
+  $('loaddef').onclick = function () {
+    snap(); doc.shapes = sampleShapes(0); doc.cleared = false;
+    ui.used = [false, false, false]; setSel([]); render();
+  };
+  $('resetlook').onclick = function () {
+    doc.st.color = '#b3121e'; doc.st.glow = 1; doc.st.outline = true; doc.st.texture = true; doc.st.bg = 'ink'; render();
+  };
   $('use').onclick = function () { for (var k = 2; k >= 0; k--) if (!ui.used[k]) { ui.used[k] = true; break; } render(); };
   $('restore').onclick = function () { ui.used = [false, false, false]; render(); };
 
@@ -569,7 +610,9 @@ if (typeof document !== 'undefined') (function () {
   sw.addEventListener('click', function (e) { var b = e.target.closest('.sw'); if (!b) return; doc.st.color = b.dataset.c; render(); });
   $('custom').addEventListener('input', function () { doc.st.color = this.value; render(); });
   $('bgseg').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; doc.st.bg = b.dataset.bg; render(); });
-  $('glow').onchange = function () { doc.st.glow = this.checked; render(); };
+  $('glowseg').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; doc.st.glow = +b.dataset.g; render(); });
+  $('outline').onchange = function () { doc.st.outline = this.checked; render(); };
+  $('texture').onchange = function () { doc.st.texture = this.checked; render(); };
   $('guides').onchange = function () { ui.guides = this.checked; render(); };
   $('showcuts').onchange = function () { ui.showCuts = this.checked; render(); };
   $('bykaku').onchange = function () { doc.st.byKaku = this.checked; render(); };
@@ -580,7 +623,7 @@ if (typeof document !== 'undefined') (function () {
   function msg(t) { $('msg').textContent = t; }
   function fileBase() { return ((doc.st.name || '').trim() || '令呪').replace(/[\\/:*?"<>|]/g, '_'); }
   function exportSVG() {
-    var st = { color: doc.st.color, glow: doc.st.glow, byKaku: false };
+    var st = { color: doc.st.color, glow: glowLevel(doc.st), outline: doc.st.outline !== false, texture: doc.st.texture !== false, byKaku: false };
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="1200" height="1200">' + bgMarkup(doc.st.bg, false) + sealMarkup(doc.shapes, st, { screen: false }) + '</svg>';
   }
   function toPNG() {
