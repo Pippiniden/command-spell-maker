@@ -214,17 +214,50 @@ function makeShape(kind, key, o) {
   for (var k in o) s[k] = o[k];
   return s;
 }
+/* ---- デフォルトの令呪 ----
+   座標は元絵（1536×1024）の画素位置で書き、キャンバスの400単位に写す */
+var REF = { cx: 768, top: 22, k: 0.39 };
+function imgPt(p) { return [AX + (p[0] - REF.cx) * REF.k, 10 + (p[1] - REF.top) * REF.k]; }
+function localize(pts) {
+  var b = mpBBox([[pts]]), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+  return { cx: cx, cy: cy, pts: pts.map(function (q) { return [r1(q[0] - cx), r1(q[1] - cy)]; }) };
+}
+function refStroke(P, w, prof, o) {
+  var L = localize(bez(P.map(imgPt)));
+  var s = { id: 's' + (nextId++), kind: 'stroke', op: 'add', pts: L.pts, prof: prof, w: r1(w * REF.k), x: r1(L.cx), y: r1(L.cy), rot: 0, s: 1, flip: false, mirror: true, kaku: 1, warp: null };
+  for (var k in o) s[k] = o[k];
+  return s;
+}
+function refPoly(ring, o) {
+  var L = localize(ring.map(imgPt));
+  var s = { id: 's' + (nextId++), kind: 'merged', op: 'add', geom: [[L.pts]], x: r1(L.cx), y: r1(L.cy), rot: 0, s: 1, flip: false, mirror: false, kaku: 1, warp: null };
+  for (var k in o) s[k] = o[k];
+  return s;
+}
+/* 四芒星：上下左右の先端と、中心へ向かうくびれ */
+function refStar(c, top, bottom, left, right, pinch) {
+  var C = [c[0], c[1]], T = [c[0], top], B = [c[0], bottom], Lp = [left, c[1]], R = [right, c[1]];
+  var q = function (a, b, sx, sy) { return quad(a, [c[0] + sx * pinch, c[1] + sy * pinch], b, 14); };
+  return [T].concat(q(T, R, 1, -1), q(R, B, 1, 1), q(B, Lp, -1, 1), q(Lp, T, -1, -1).slice(0, -1));
+}
 function sampleShapes() {
   return [
-    makeShape('stroke', 'sword',    { x: 200, y: 150, s: 1.85, w: 12, kaku: 1, mirror: false }),
-    makeShape('stroke', 'wing',     { x: 252, y: 128, s: 1.15, rot: -4, kaku: 1 }),
-    makeShape('stroke', 'wing',     { x: 246, y: 170, s: 0.8, rot: 12, kaku: 1 }),
-    makeShape('stroke', 'crescent', { x: 200, y: 232, s: 1.25, w: 16, kaku: 2, mirror: false }),
-    makeShape('prim',   'diamond',  { x: 200, y: 220, s: 0.5, kaku: 2, mirror: false }),
-    makeShape('prim',   'arrow',    { x: 200, y: 268, s: 0.42, rot: 180, kaku: 2, mirror: false, op: 'cut' }),
-    makeShape('stroke', 'wave',     { x: 268, y: 142, s: 0.6, w: 12, rot: 50, kaku: 1, op: 'cut' }),
-    makeShape('stroke', 'hook',     { x: 236, y: 296, s: 0.85, rot: 160, kaku: 3, warp: [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [-14, 10], [0, 0]] }),
-    makeShape('prim',   'drop',     { x: 200, y: 322, s: 0.7, rot: 180, kaku: 3, mirror: false })
+    /* 一画：穂先と柄、外側の大きな弧と返し */
+    refPoly([[768, 22], [800, 140], [779, 128], [757, 128], [736, 140]], { kaku: 1 }),
+    refStroke([[768, 122], [768, 180], [768, 240], [768, 300]], 26, 'sweep', { kaku: 1, mirror: false }),
+    refStroke([[708, 133], [622, 196], [604, 364], [697, 424]], 28, 'both', { kaku: 1 }),
+    refStroke([[670, 186], [632, 236], [600, 288], [578, 313]], 28, 'sweep', { kaku: 1 }),
+    /* 二画：四芒星、内側の弧、鍔と棘 */
+    refPoly(refStar([768, 338], 266, 448, 694, 842, 7), { kaku: 2 }),
+    refStroke([[676, 316], [678, 382], [700, 424], [748, 446]], 20, 'entry', { kaku: 2 }),
+    refStroke([[750, 452], [680, 436], [590, 438], [503, 465]], 46, 'sweep', { kaku: 2 }),
+    refStroke([[642, 446], [636, 430], [632, 416], [630, 403]], 16, 'sweep', { kaku: 2 }),
+    /* 三画：菱、下へ伸びる刃と脇の刃 */
+    refPoly([[768, 450], [787, 495], [768, 542], [749, 495]], { kaku: 3 }),
+    refStroke([[768, 470], [768, 650], [768, 800], [768, 996]], 52, 'sweep', { kaku: 3, mirror: false }),
+    refStroke([[676, 496], [730, 556], [748, 700], [764, 905]], 40, 'both', { kaku: 3 }),
+    /* 刃の間の細い溝（消しゴム） */
+    refStroke([[744, 520], [750, 640], [758, 760], [765, 885]], 5, 'even', { kaku: 3, op: 'cut' })
   ];
 }
 
@@ -474,6 +507,7 @@ if (typeof document !== 'undefined') (function () {
     clearTimeout(clearArm); clearArm = 0; $('clear').textContent = '全て消す';
     snap(); doc.shapes = []; doc.cleared = true; setSel([]); render();
   };
+  $('loaddef').onclick = function () { snap(); doc.shapes = sampleShapes(); doc.cleared = false; setSel([]); render(); };
   $('use').onclick = function () { for (var k = 2; k >= 0; k--) if (!ui.used[k]) { ui.used[k] = true; break; } render(); };
   $('restore').onclick = function () { ui.used = [false, false, false]; render(); };
 
