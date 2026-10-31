@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>令呪デザイナー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <p class="eyebrow">COMMAND SEAL DESIGNER</p>
+    <h1>令呪デザイナー</h1>
+    <p class="lede">パーツと先細りの筆で形を置き、メッシュで歪ませ、消しゴムの形で削り、複数の形を合体させて令呪を組み立てます。形ごとに一画目から三画目を割り当てて、消えていく順番も確かめられます。</p>
+  </header>
+
+  <div class="app">
+    <section class="a-canvas">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="操作">
+          <button id="m-select" type="button" aria-pressed="true">選択・移動</button>
+          <button id="m-draw" type="button" aria-pressed="false">筆で描く</button>
+        </div>
+        <button id="multi" type="button" class="toggle" aria-pressed="false">複数選択</button>
+        <span class="spacer"></span>
+        <button id="undo" type="button">元に戻す</button>
+        <button id="redo" type="button">やり直す</button>
+        <button id="clear" type="button" class="danger">全て消す</button>
+      </div>
+      <div class="board"><svg id="cv" viewBox="0 0 400 400" aria-label="令呪のキャンバス"></svg></div>
+      <div class="status">
+        <span id="remain">残り 3 画</span>
+        <span id="counts"></span>
+        <button id="use" type="button" class="primary">一画使う</button>
+        <button id="restore" type="button">全画戻す</button>
+      </div>
+    </section>
+
+    <aside class="a-parts box">
+      <h2>パーツ</h2>
+      <div class="group">
+        <span class="lbl">置き方</span>
+        <div class="seg full" id="newop" role="group" aria-label="置き方">
+          <button type="button" data-op="add" aria-pressed="true">塗る</button>
+          <button type="button" data-op="cut" class="cutbtn" aria-pressed="false">消しゴム</button>
+        </div>
+        <p class="hint" id="ophint">パーツや筆の線を、そのまま赤い形として置きます。</p>
+      </div>
+      <div class="group">
+        <span class="lbl">線のパーツ</span>
+        <div class="parts" id="parts-line"></div>
+      </div>
+      <div class="group">
+        <span class="lbl">面のパーツ</span>
+        <div class="parts" id="parts-fill"></div>
+      </div>
+      <div class="group">
+        <span class="lbl">新しい形の画</span>
+        <div class="seg full" id="newkaku" role="group" aria-label="新しい形の画">
+          <button type="button" data-k="1" aria-pressed="true">一画</button>
+          <button type="button" data-k="2" aria-pressed="false">二画</button>
+          <button type="button" data-k="3" aria-pressed="false">三画</button>
+        </div>
+        <label class="check"><input id="newmirror" type="checkbox" checked> 左右対称で置く</label>
+      </div>
+      <div class="group">
+        <span class="lbl">筆</span>
+        <div class="row"><label for="brushw">太さ</label><output id="brushw-o">14</output></div>
+        <input id="brushw" type="range" min="3" max="40" step="1" value="14">
+        <label for="brushp">筆の形</label>
+        <select id="brushp">
+          <option value="both">両端が尖る</option>
+          <option value="sweep" selected>払い（入りが太い）</option>
+          <option value="entry">入り（終わりが太い）</option>
+          <option value="even">均一</option>
+        </select>
+        <p class="hint">「筆で描く」にしてキャンバスをなぞると、先細りの線になります。</p>
+      </div>
+    </aside>
+
+    <aside class="a-props box">
+      <h2>選んだ形</h2>
+      <p class="hint" id="nosel">形をクリックすると、ここで回転や大きさ、歪みを変えられます。Shiftキーを押しながらクリックするか「複数選択」をオンにすると、いくつも選んで合体できます。</p>
+
+      <div id="multiprops" hidden>
+        <div class="group">
+          <span class="count" id="multicount">2個を選択中</span>
+          <button id="merge" type="button" class="primary">合体してひとつの形にする</button>
+          <p class="hint">消しゴムの形も一緒に選ぶと、削った状態で確定します。左右対称の形だけを選んだときは、合体後も左右対称のままです。</p>
+          <div class="seg full" id="m-kaku" role="group" aria-label="選んだ形の画">
+            <button type="button" data-k="1">一画</button>
+            <button type="button" data-k="2">二画</button>
+            <button type="button" data-k="3">三画</button>
+          </div>
+          <div class="btns">
+            <button id="m-dup" type="button">複製</button>
+            <button id="m-del" type="button" class="danger">削除</button>
+          </div>
+          <button id="m-desel" type="button">選択解除</button>
+          <p class="msg" id="mergemsg" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <div id="props" hidden>
+        <div class="group">
+          <div class="seg full" id="p-op" role="group" aria-label="この形の役割">
+            <button type="button" data-op="add">塗る</button>
+            <button type="button" data-op="cut" class="cutbtn">消しゴム</button>
+          </div>
+          <div class="seg full" id="p-kaku" role="group" aria-label="この形の画">
+            <button type="button" data-k="1">一画</button>
+            <button type="button" data-k="2">二画</button>
+            <button type="button" data-k="3">三画</button>
+          </div>
+          <div class="row"><label for="p-rot">回転</label><output id="p-rot-o">0°</output></div>
+          <input id="p-rot" type="range" min="-180" max="180" step="1" value="0">
+          <div class="row"><label for="p-size">大きさ</label><output id="p-size-o">100%</output></div>
+          <input id="p-size" type="range" min="0.15" max="3" step="0.01" value="1">
+          <div id="p-w-wrap" class="group">
+            <div class="row"><label for="p-w">太さ</label><output id="p-w-o">14</output></div>
+            <input id="p-w" type="range" min="2" max="44" step="0.5" value="14">
+          </div>
+          <div id="p-prof-wrap" class="group">
+            <label for="p-prof">筆の形</label>
+            <select id="p-prof">
+              <option value="both">両端が尖る</option>
+              <option value="sweep">払い（入りが太い）</option>
+              <option value="entry">入り（終わりが太い）</option>
+              <option value="even">均一</option>
+            </select>
+          </div>
+          <label class="check"><input id="p-mirror" type="checkbox"> 左右対称</label>
+          <div class="btns">
+            <button id="p-warp" type="button" class="toggle" aria-pressed="false">歪ませる</button>
+            <button id="p-unwarp" type="button">歪みを戻す</button>
+          </div>
+          <p class="hint" id="warphint" hidden>形のまわりの9つの点をドラッグすると、形全体がなめらかに歪みます。</p>
+          <div class="btns">
+            <button id="p-flip" type="button">左右反転</button>
+            <button id="p-dup" type="button">複製</button>
+            <button id="p-front" type="button">前面へ</button>
+            <button id="p-back" type="button">背面へ</button>
+            <button id="p-del" type="button" class="danger">削除</button>
+            <button id="p-desel" type="button">選択解除</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <aside class="a-finish box">
+      <h2>仕上げ</h2>
+      <div class="group">
+        <span class="lbl">色</span>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div class="group">
+        <span class="lbl">背景</span>
+        <div class="seg full" id="bgseg" role="group" aria-label="背景">
+          <button type="button" data-bg="ink">墨</button>
+          <button type="button" data-bg="skin">肌</button>
+          <button type="button" data-bg="paper">紙</button>
+          <button type="button" data-bg="none">透明</button>
+        </div>
+      </div>
+      <div class="group">
+        <label class="check"><input id="glow" type="checkbox" checked> 光らせる</label>
+        <label class="check"><input id="guides" type="checkbox" checked> ガイド線を表示</label>
+        <label class="check"><input id="showcuts" type="checkbox" checked> 消しゴムの形を表示</label>
+        <label class="check"><input id="bykaku" type="checkbox"> 画ごとに色分けして表示</label>
+      </div>
+      <div class="group">
+        <label class="lbl" for="dname">デザイン名</label>
+        <input id="dname" type="text" value="わたしの令呪" maxlength="40">
+        <div class="btns">
+          <button id="x-png" type="button" class="primary">PNGで保存</button>
+          <button id="x-svg" type="button">SVGで保存</button>
+        </div>
+        <button id="x-copy" type="button">SVGのコードをコピー</button>
+        <p id="msg" class="msg" aria-live="polite"></p>
+        <div id="preview" hidden></div>
+      </div>
+    </aside>
+  </div>
+
+  <p class="note">パーツはすべて汎用の図形です。描いた内容はこのブラウザに自動で保存されます。</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/polygon-clipping@0.15.7/dist/polygon-clipping.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
