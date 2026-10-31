@@ -222,42 +222,70 @@ function localize(pts) {
   var b = mpBBox([[pts]]), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
   return { cx: cx, cy: cy, pts: pts.map(function (q) { return [r1(q[0] - cx), r1(q[1] - cy)]; }) };
 }
-function refStroke(P, w, prof, o) {
-  var L = localize(bez(P.map(imgPt)));
-  var s = { id: 's' + (nextId++), kind: 'stroke', op: 'add', pts: L.pts, prof: prof, w: r1(w * REF.k), x: r1(L.cx), y: r1(L.cy), rot: 0, s: 1, flip: false, mirror: true, kaku: 1, warp: null };
-  for (var k in o) s[k] = o[k];
-  return s;
-}
-function refPoly(ring, o) {
-  var L = localize(ring.map(imgPt));
-  var s = { id: 's' + (nextId++), kind: 'merged', op: 'add', geom: [[L.pts]], x: r1(L.cx), y: r1(L.cy), rot: 0, s: 1, flip: false, mirror: false, kaku: 1, warp: null };
-  for (var k in o) s[k] = o[k];
-  return s;
-}
-/* 四芒星：上下左右の先端と、中心へ向かうくびれ */
-function refStar(c, top, bottom, left, right, pinch) {
-  var C = [c[0], c[1]], T = [c[0], top], B = [c[0], bottom], Lp = [left, c[1]], R = [right, c[1]];
-  var q = function (a, b, sx, sy) { return quad(a, [c[0] + sx * pinch, c[1] + sy * pinch], b, 14); };
-  return [T].concat(q(T, R, 1, -1), q(R, B, 1, 1), q(B, Lp, -1, 1), q(Lp, T, -1, -1).slice(0, -1));
-}
 function sampleShapes() {
+  /* 元画像の座標（1536×1024）をキャンバス（400×400）へ写す */
+  var K = 0.37;
+  function T(p) { return [AX + (p[0] - 767.5) * K, 20 + (p[1] - 22) * K]; }
+  function base(o) {
+    var s = { id: 's' + (nextId++), op: 'add', rot: 0, s: 1, flip: false, mirror: true, kaku: 1, warp: null };
+    for (var k in o) s[k] = o[k];
+    return s;
+  }
+  function centered(ring, o) {
+    var b = mpBBox([[ring]]), cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+    o.x = r1(cx); o.y = r1(cy);
+    return { cx: cx, cy: cy, pts: ring.map(function (q) { return [r1(q[0] - cx), r1(q[1] - cy)]; }) };
+  }
+  function spine(P, w, prof, o) {
+    var pts = P.length === 4 ? bez(P.map(T)) : resample(P.map(T), 2.5);
+    o.kind = 'stroke'; o.prof = prof; o.w = r1(w * K);
+    o.pts = centered(pts, o).pts;
+    return base(o);
+  }
+  /* 角（c=true）の間をなめらかな曲線でつないだ輪郭 */
+  function traced(P, o) {
+    var n = P.length, idx = [], ring = [];
+    P.forEach(function (p, i) { if (p[2]) idx.push(i); });
+    idx.forEach(function (a, k) {
+      var b = idx[(k + 1) % idx.length], chain = [];
+      for (var i = a; ; i = (i + 1) % n) { chain.push(T(P[i])); if (i === b) break; }
+      for (var j = 0; j < chain.length - 1; j++) {
+        var p0 = chain[Math.max(0, j - 1)], p1 = chain[j], p2 = chain[j + 1], p3 = chain[Math.min(chain.length - 1, j + 2)];
+        for (var s = 0; s < 6; s++) {
+          var t = s / 6, t2 = t * t, t3 = t2 * t;
+          ring.push([0, 1].map(function (d) {
+            return 0.5 * (2 * p1[d] + (-p0[d] + p2[d]) * t + (2 * p0[d] - 5 * p1[d] + 4 * p2[d] - p3[d]) * t2 + (-p0[d] + 3 * p1[d] - 3 * p2[d] + p3[d]) * t3);
+          }));
+        }
+      }
+    });
+    o.kind = 'merged';
+    o.geom = [[centered(ring, o).pts]];
+    return base(o);
+  }
+  /* 中央の四芒星：上・下・左右で長さが違うので輪郭を直接作る */
+  function star() {
+    var c = T([767.5, 340]), t = 68 * K, bt = 105 * K, sd = 72 * K, q = 7 * K;
+    var top = [0, -t], rt = [sd, 0], bot = [0, bt], lf = [-sd, 0];
+    var ring = [top].concat(quad(top, [q, -q], rt, 18), quad(rt, [q, q], bot, 24), quad(bot, [-q, q], lf, 24), quad(lf, [-q, -q], top, 18).slice(0, -1));
+    return base({ kind: 'merged', geom: [[ring.map(function (p) { return [r1(p[0]), r1(p[1])]; })]], x: r1(c[0]), y: r1(c[1]), mirror: false, kaku: 1 });
+  }
+  var C = true;
   return [
-    /* 一画：穂先と柄、外側の大きな弧と返し */
-    refPoly([[768, 22], [800, 140], [779, 128], [757, 128], [736, 140]], { kaku: 1 }),
-    refStroke([[768, 122], [768, 180], [768, 240], [768, 300]], 26, 'sweep', { kaku: 1, mirror: false }),
-    refStroke([[708, 133], [622, 196], [604, 364], [697, 424]], 28, 'both', { kaku: 1 }),
-    refStroke([[670, 186], [632, 236], [600, 288], [578, 313]], 28, 'sweep', { kaku: 1 }),
-    /* 二画：四芒星、内側の弧、鍔と棘 */
-    refPoly(refStar([768, 338], 266, 448, 694, 842, 7), { kaku: 2 }),
-    refStroke([[676, 316], [678, 382], [700, 424], [748, 446]], 20, 'entry', { kaku: 2 }),
-    refStroke([[750, 452], [680, 436], [590, 438], [503, 465]], 46, 'sweep', { kaku: 2 }),
-    refStroke([[642, 446], [636, 430], [632, 416], [630, 403]], 16, 'sweep', { kaku: 2 }),
-    /* 三画：菱、下へ伸びる刃と脇の刃 */
-    refPoly([[768, 450], [787, 495], [768, 542], [749, 495]], { kaku: 3 }),
-    refStroke([[768, 470], [768, 650], [768, 800], [768, 996]], 52, 'sweep', { kaku: 3, mirror: false }),
-    refStroke([[676, 496], [730, 556], [748, 700], [764, 905]], 40, 'both', { kaku: 3 }),
-    /* 刃の間の細い溝（消しゴム） */
-    refStroke([[744, 520], [750, 640], [758, 760], [765, 885]], 5, 'even', { kaku: 3, op: 'cut' })
+    /* 一画：矢じり・軸・四芒星 */
+    makeShape('prim', 'arrow', { x: AX, y: 47.8, s: 0.77, w: 6.3, mirror: false, kaku: 1 }),
+    spine([[767.5, 122], [767.5, 300]], 32, 'sweep', { mirror: false, kaku: 1 }),
+    star(),
+    /* 二画：棘のある外側の弧、内側の弧 */
+    traced([[708, 134, C], [670, 160], [637, 200], [610, 240], [590, 277], [577, 313, C], [593, 289], [613, 279, C], [618, 290], [622, 320], [630, 360], [647, 390], [673, 422, C],
+            [653, 387], [642, 337], [639, 287], [643, 247], [657, 207], [680, 170]], { kaku: 2 }),
+    spine([[656, 315], [668, 370], [700, 410], [752, 437]], 34, 'entry', { kaku: 2 }),
+    /* 三画：棘のある横の刃、付け根の鉤、下の菱と剣、下の刃 */
+    traced([[503, 466, C], [557, 443], [610, 405, C], [612, 423], [630, 433], [657, 435], [683, 430, C], [707, 443], [722, 462], [728, 487, C],
+            [705, 476], [677, 463], [640, 447], [600, 442], [550, 449]], { kaku: 3 }),
+    spine([[668, 447], [716, 452], [714, 497], [680, 503]], 24, 'sweep', { kaku: 3 }),
+    spine([[767.5, 456], [767.5, 752]], 52, 'sweep', { mirror: false, kaku: 3 }),
+    spine([[694, 476], [712, 600], [735, 760], [766, 996]], 42, 'sweep', { kaku: 3 })
   ];
 }
 
@@ -507,7 +535,7 @@ if (typeof document !== 'undefined') (function () {
     clearTimeout(clearArm); clearArm = 0; $('clear').textContent = '全て消す';
     snap(); doc.shapes = []; doc.cleared = true; setSel([]); render();
   };
-  $('loaddef').onclick = function () { snap(); doc.shapes = sampleShapes(); doc.cleared = false; setSel([]); render(); };
+  $('loaddef').onclick = function () { snap(); doc.shapes = sampleShapes(); doc.cleared = false; ui.used = [false, false, false]; setSel([]); render(); };
   $('use').onclick = function () { for (var k = 2; k >= 0; k--) if (!ui.used[k]) { ui.used[k] = true; break; } render(); };
   $('restore').onclick = function () { ui.used = [false, false, false]; render(); };
 
