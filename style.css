@@ -80,6 +80,11 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .part svg { width: 34px; height: 34px; color: var(--seal); }
 .part span { font-size: 12px; }
 .parts.cutmode .part svg { color: var(--cut); }
+.samples { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+@media (min-width: 1040px) { .samples { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.smp { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px 5px; min-height: 0; }
+.smp svg { width: 100%; max-width: 64px; aspect-ratio: 1; }
+.smp span { font-size: 11px; line-height: 1.3; text-align: center; }
 
 input[type=range] { width: 100%; accent-color: var(--seal); }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

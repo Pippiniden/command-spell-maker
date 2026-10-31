@@ -28,7 +28,6 @@
         <span class="spacer"></span>
         <button id="undo" type="button">元に戻す</button>
         <button id="redo" type="button">やり直す</button>
-        <button id="loaddef" type="button">デフォルト令呪</button>
         <button id="clear" type="button" class="danger">全て消す</button>
       </div>
       <div class="board"><svg id="cv" viewBox="0 0 400 400" aria-label="令呪のキャンバス"></svg></div>
@@ -41,6 +40,11 @@
     </section>
 
     <aside class="a-parts box">
+      <h2>見本</h2>
+      <div class="group">
+        <div class="samples" id="samples"></div>
+        <p class="hint">押すと今の形と入れ替わります。「元に戻す」で戻せます。</p>
+      </div>
       <h2>パーツ</h2>
       <div class="group">
         <span class="lbl">置き方</span>
@@ -178,6 +182,7 @@
         <label class="check"><input id="guides" type="checkbox" checked> ガイド線を表示</label>
         <label class="check"><input id="showcuts" type="checkbox" checked> 消しゴムの形を表示</label>
         <label class="check"><input id="bykaku" type="checkbox"> 画ごとに色分けして表示</label>
+        <button id="resetlook" type="button">仕上げを初期値に戻す</button>
       </div>
       <div class="group">
         <label class="lbl" for="dname">デザイン名</label>
