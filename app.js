@@ -213,7 +213,7 @@ function sealMarkup(shapes, st, opts) {
     var paths;
     if (it.clipped) paths = it.mp.length ? P(mpD(it.mp), 'evenodd') : '';
     else paths = it.mp.map(function (poly) { return P(mpD([poly]), s.kind === 'stroke' ? 'nonzero' : 'evenodd'); }).join('');
-    var g = '<g' + (opts.screen ? ' data-id="' + s.id + '"' : '') + (gone ? ' opacity="0.07"' : '') + '>' + paths + '</g>';
+    var g = '<g' + (opts.screen ? ' data-id="' + s.id + '"' : ' data-kaku="' + s.kaku + '"') + (gone ? ' opacity="0.07"' : '') + '>' + paths + '</g>';
     body += g;
   });
   var fx = effects(st);
